@@ -13,6 +13,8 @@ local requestfunc = syn and syn.request or http and http.request or http_request
 local getasset = getsynasset or getcustomasset
 
 local RenderStepTable = {}
+local StepTable = {}
+
 local function BindToRenderStep(name, num, func)
 	if RenderStepTable[name] == nil then
 		RenderStepTable[name] = game:GetService("RunService").RenderStepped:connect(func)
@@ -25,20 +27,32 @@ local function UnbindFromRenderStep(name)
 	end
 end
 
+local function BindToStepped(name, num, func)
+	if StepTable[name] == nil then
+		StepTable[name] = game:GetService("RunService").Stepped:connect(func)
+	end
+end
+local function UnbindFromStepped(name)
+	if StepTable[name] then
+		StepTable[name]:Disconnect()
+		StepTable[name] = nil
+	end
+end
+
 local function createwarning(title, text, delay)
 	pcall(function()
-		local frame = GuiLibrary["CreateNotification"](title, text, delay, "vapeprivate/assets/WarningNotification.png")
+		local frame = GuiLibrary["CreateNotification"](title, text, delay, "assets/WarningNotification.png")
 		frame.Frame.BackgroundColor3 = Color3.fromRGB(236, 129, 44)
 		frame.Frame.Frame.BackgroundColor3 = Color3.fromRGB(236, 129, 44)
 	end)
 end
 
 local function friendCheck(plr, recolor)
-	return (recolor and GuiLibrary["ObjectsThatCanBeSaved"]["Recolor visualsToggle"]["Api"]["Enabled"] or (not recolor)) and GuiLibrary["ObjectsThatCanBeSaved"]["Use FriendsToggle"]["Api"]["Enabled"] and table.find(GuiLibrary["ObjectsThatCanBeSaved"]["FriendsListTextList"]["Api"]["ObjectList"], plr.Name)
+	return (recolor and GuiLibrary["ObjectsThatCanBeSaved"]["Recolor visualsToggle"]["Api"]["Enabled"] or (not recolor)) and GuiLibrary["ObjectsThatCanBeSaved"]["Use FriendsToggle"]["Api"]["Enabled"] and table.find(GuiLibrary["ObjectsThatCanBeSaved"]["FriendsListTextCircleList"]["Api"]["ObjectList"], plr.Name) and GuiLibrary["ObjectsThatCanBeSaved"]["FriendsListTextCircleList"]["Api"]["ObjectListEnabled"][table.find(GuiLibrary["ObjectsThatCanBeSaved"]["FriendsListTextCircleList"]["Api"]["ObjectList"], plr.Name)]
 end
 
 local function getPlayerColor(plr)
-	return (friendCheck(plr, true) and Color3.fromHSV(GuiLibrary["ObjectsThatCanBeSaved"]["Friends ColorSliderColor"]["Api"]["Value"], 1, 1) or tostring(plr.TeamColor) ~= "White" and plr.TeamColor.Color)
+	return (friendCheck(plr, true) and Color3.fromHSV(GuiLibrary["ObjectsThatCanBeSaved"]["Friends ColorSliderColor"]["Api"]["Hue"], GuiLibrary["ObjectsThatCanBeSaved"]["Friends ColorSliderColor"]["Api"]["Sat"], GuiLibrary["ObjectsThatCanBeSaved"]["Friends ColorSliderColor"]["Api"]["Value"]) or tostring(plr.TeamColor) ~= "White" and plr.TeamColor.Color)
 end
 
 local function getcustomassetfunc(path)
@@ -58,7 +72,7 @@ local function getcustomassetfunc(path)
 			textlabel:Remove()
 		end)
 		local req = requestfunc({
-			Url = "https://raw.githubusercontent.com/TacsHasSkillIssueRoblox/VapeV4AprilFools/main/"..path:gsub("vape/assets", "assets"),
+			Url = "https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/main/"..path:gsub("vape/assets", "assets"),
 			Method = "GET"
 		})
 		writefile(path, req.Body)
@@ -71,7 +85,7 @@ shared.vapeteamcheck = function(plr)
 end
 
 local function targetCheck(plr, check)
-	return (check and plr.Character.Humanoid.Health > 0 or check == false)
+	return (check and plr.Character.Humanoid.Health > 0 and plr.Character:FindFirstChild("ForceField") == nil or check == false)
 end
 
 local function isAlive(plr)
@@ -82,7 +96,7 @@ local function isAlive(plr)
 end
 
 local function isPlayerTargetable(plr, target, friend)
-    return plr ~= lplr and plr and (friend and friendCheck(plr) == nil or (not friend)) and isAlive(plr) and targetCheck(plr, target) and (not unpack(workspace:FindPartsInRegion3WithWhiteList(Region3.new(Vector3.new(-38, -24, -38), Vector3.new(38, 24, 38)), {plr.Character}))) and (not unpack(workspace:FindPartsInRegion3WithWhiteList(Region3.new(Vector3.new(-38, -24, -38), Vector3.new(38, 24, 38)), {lplr.Character})))
+    return plr ~= lplr and plr and (friend and friendCheck(plr) == nil or (not friend)) and isAlive(plr) and targetCheck(plr, target) and shared.vapeteamcheck(plr)
 end
 
 local function vischeck(char, part)
@@ -166,79 +180,96 @@ local function findTouchInterest(tool)
 	return nil
 end
 
+local hitremote = ""
+lplr.DescendantRemoving:connect(function(tool)
+    if tool:IsA("Tool") then 
+        for i,v in pairs(debug.getprotos(getscriptclosure(tool.LocalScript))) do
+            local constants = debug.getconstants(v)
+            for i2,v2 in pairs(constants) do 
+                if v2 == "FireServer" and table.find(constants, "isInArena") then 
+                    hitremote = constants[i2 - 1]
+                end
+            end
+        end
+    end
+end)
+
 GuiLibrary["RemoveObject"]("KillauraOptionsButton")
-local killauraaps = {["GetRandomValue"] = function() return 1 end}
-local killaurarange = {["Value"] = 1}
-local killauraangle = {["Value"] = 90}
-local killauratarget = {["Value"] = 1}
-local killauramouse = {["Enabled"] = false}
-local killauratargetframe = {["Players"] = {["Enabled"] = false}}
-local killauracframe = {["Enabled"] = false}
-local Killaura = {["Enabled"] = false}
-local killauratick = tick()
-Killaura = GuiLibrary["ObjectsThatCanBeSaved"]["BlatantWindow"]["Api"].CreateOptionsButton({
-	["Name"] = "Killaura", 
-	["Function"] = function(callback)
-		if callback then
-			BindToRenderStep("Killaura", 1, function() 
-				local plr = GetNearestHumanoidToPosition(killauratargetframe["Players"]["Enabled"], killaurarange["Value"], 100)
-				if isAlive() and (killauramouse["Enabled"] and uis:IsMouseButtonPressed(0) or (not killauramouse["Enabled"])) and killauratick <= tick() then
-						local targettable = {}
-						local targetsize = 0
-						killauratick = tick() + 0.1
-						if plr then
-							local localfacing = lplr.Character.HumanoidRootPart.CFrame.lookVector
-							local vec = (plr.Character.HumanoidRootPart.Position - lplr.Character.HumanoidRootPart.Position).unit
-							local angle = math.acos(localfacing:Dot(vec))
-							if angle <= (killauraangle["Value"] / 115) then
-								targettable[plr.Name] = {
-									["UserId"] = plr.UserId,
-									["Health"] = plr.Character.Humanoid.Health,
-									["MaxHealth"] = plr.Character.Humanoid.MaxHealth
-								}
-								targetsize = targetsize + 1
-								if killauracframe["Enabled"] then
-									lplr.Character:SetPrimaryPartCFrame(CFrame.new(lplr.Character.PrimaryPart.Position, Vector3.new(plr.Character:FindFirstChild("HumanoidRootPart").Position.X, lplr.Character.PrimaryPart.Position.Y, plr.Character:FindFirstChild("HumanoidRootPart").Position.Z)))
+runcode(function()
+	local killauraaps = {["GetRandomValue"] = function() return 1 end}
+	local killaurarange = {["Value"] = 1}
+	local killauraangle = {["Value"] = 90}
+	local killauratarget = {["Value"] = 1}
+	local killauramouse = {["Enabled"] = false}
+	local killauratargetframe = {["Players"] = {["Enabled"] = false}}
+	local killauracframe = {["Enabled"] = false}
+	local Killaura = {["Enabled"] = false}
+	local killauratick = tick()
+	local killauranear = false
+	Killaura = GuiLibrary["ObjectsThatCanBeSaved"]["BlatantWindow"]["Api"].CreateOptionsButton({
+		["Name"] = "Killaura", 
+		["Function"] = function(callback)
+			if callback then
+				BindToRenderStep("Killaura", 1, function() 
+					killauranear = false
+					if isAlive() then
+						local plr = GetAllNearestHumanoidToPosition(killauratargetframe["Players"]["Enabled"], killaurarange["Value"], 100)
+						if (killauramouse["Enabled"] and uis:IsMouseButtonPressed(0) or (not killauramouse["Enabled"])) then
+							local targettable = {}
+							local targetsize = 0
+							for i,v in pairs(plr) do
+								local localfacing = lplr.Character.HumanoidRootPart.CFrame.lookVector
+								local vec = (v.Character.HumanoidRootPart.Position - lplr.Character.HumanoidRootPart.Position).unit
+								local angle = math.acos(localfacing:Dot(vec))
+								if angle <= math.rad(killauraangle["Value"]) and v.Character:FindFirstChild("Reversed") == nil then
+									killauranear = true
+									targettable[v.Name] = {
+										["UserId"] = v.UserId,
+										["Health"] = v.Character.Humanoid.Health,
+										["MaxHealth"] = v.Character.Humanoid.MaxHealth
+									}
+									targetsize = targetsize + 1
+									if killauracframe["Enabled"] then
+										lplr.Character:SetPrimaryPartCFrame(CFrame.new(lplr.Character.PrimaryPart.Position, Vector3.new(v.Character:FindFirstChild("HumanoidRootPart").Position.X, lplr.Character.PrimaryPart.Position.Y, v.Character:FindFirstChild("HumanoidRootPart").Position.Z)))
+									end
+									if killauratick <= tick() then
+										pcall(function() game:GetService("ReplicatedStorage")[hitremote]:FireServer(v.Character.Torso) end)
+										lplr.Character.Humanoid.Animator:LoadAnimation(game:GetService("ReplicatedStorage").Slap):Play()
+										killauratick = tick() + 0.1
+									end
 								end
-
-								game:GetService("ReplicatedStorage").Sword:FireServer(plr.Character.HumanoidRootPart)
-
 							end
+							targetinfo.UpdateInfo(targettable, targetsize)
 						end
-						targetinfo.UpdateInfo(targettable, targetsize)
-				end
-			end)
-		else
-			UnbindFromRenderStep("Killaura")
-		end
-	end
-})
-killauratargetframe = Killaura.CreateTargetWindow({})
-killauraaps = Killaura.CreateTwoSlider({
-	["Name"] = "Attacks per second",
-	["Min"] = 1,
-	["Max"] = 20,
-	["Default"] = 8,
-	["Default2"] = 12
-})
-killaurarange = Killaura.CreateSlider({
-	["Name"] = "Attack range",
-	["Min"] = 1,
-	["Max"] = 150, 
-	["Function"] = function(val) end
-})
-killauraangle = Killaura.CreateSlider({
-	["Name"] = "Max angle",
-	["Min"] = 1,
-	["Max"] = 360, 
-	["Function"] = function(val) end,
-	["Default"] = 90
-})
-killauramouse = Killaura.CreateToggle({
-	["Name"] = "Require mouse down", 
-	["Function"] = function() end
-})
-killauracframe = Killaura.CreateToggle({
-	["Name"] = "Face target", 
-	["Function"] = function() end
-})
+					end
+				end)
+			else
+				UnbindFromRenderStep("Killaura")
+				killauranear = false
+			end
+		end,
+		["HoverText"] = "Attack players around you\nwithout aiming at them."
+	})
+	killauratargetframe = Killaura.CreateTargetWindow({})
+	killaurarange = Killaura.CreateSlider({
+		["Name"] = "Attack range",
+		["Min"] = 1,
+		["Max"] = 25, 
+		["Function"] = function(val) end
+	})
+	killauraangle = Killaura.CreateSlider({
+		["Name"] = "Max angle",
+		["Min"] = 1,
+		["Max"] = 360, 
+		["Function"] = function(val) end,
+		["Default"] = 90
+	})
+	killauramouse = Killaura.CreateToggle({
+		["Name"] = "Require mouse down", 
+		["Function"] = function() end
+	})
+	killauracframe = Killaura.CreateToggle({
+		["Name"] = "Face target", 
+		["Function"] = function() end
+	})
+end)
