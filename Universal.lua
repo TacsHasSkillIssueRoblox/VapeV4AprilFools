@@ -47,7 +47,7 @@ end
 
 local function vapeGithubRequest(scripturl)
 	if not isfile("vape/"..scripturl) then
-		local suc, res = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/TacsHasSkillIssue/VapeV4AprilFools/"..readfile("vape/commithash.txt").."/"..scripturl, true) end)
+		local suc, res = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/"..readfile("vape/commithash.txt").."/"..scripturl, true) end)
 		assert(suc, res)
 		assert(res ~= "404: Not Found", res)
 		if scripturl:find(".lua") then res = "--This watermark is used to delete the file if its cached, remove it to make the file persist after commits.\n"..res end
@@ -149,32 +149,74 @@ do
 		if (not lplr.Team) then return true end
 		if (not plr.Team) then return true end
 		if plr.Team ~= lplr.Team then return true end
-        return #plr.Team:GetPlayers() == #playersService:GetPlayers()
+        return #plr.Team:GetPlayers() == playersService.NumPlayers
 	end
 	entityLibrary.fullEntityRefresh()
 	entityLibrary.LocalPosition = Vector3.zero
 	entityLibrary.OtherPosition = {}
+
 	task.spawn(function()
 		local postable = {}
-		local postable2 = {}
 		repeat
+			task.wait()
 			if entityLibrary.isAlive then
-				table.insert(postable, entityLibrary.character.HumanoidRootPart.Position)
-				if #postable > 60 then 
+				table.insert(postable, {Time = tick(), Position = entityLibrary.character.HumanoidRootPart.Position})
+				if #postable > 80 then 
 					table.remove(postable, 1)
 				end
-				entityLibrary.LocalPosition = postable[46] or entityLibrary.character.HumanoidRootPart.Position
-			end
-			for i,v in pairs(entityLibrary.entityList) do 
-				if postable2[v.Player] == nil then 
-					postable2[v.Player] = v.RootPart.Position
+				local closestmag = 9e9
+				local closestpos = entityLibrary.character.HumanoidRootPart.Position
+				local closestpos2 = entityLibrary.character.HumanoidRootPart.Position
+				for i, v in pairs(postable) do 
+					local mag = math.abs(tick() - (v.Time + 0.1))
+					if mag < closestmag then
+						closestmag = mag
+						closestpos = (postable[i - 1] or v).Position:lerp(v.Position, 0.85)
+					end
 				end
-				entityLibrary.OtherPosition[v.Player] = v.RootPart.Position + ((v.RootPart.Position - postable2[v.Player]) * 3)
-				postable2[v.Player] = v.RootPart.Position
+				entityLibrary.LocalPosition = closestpos
 			end
-			task.wait()
 		until not vapeInjected
 	end)
+	task.spawn(function()
+		local postable2 = {}
+		local movementtable = {}
+		local movecalc = tick()
+		repeat
+			task.wait()
+			for i,v in pairs(entityLibrary.entityList) do 
+				entityLibrary.OtherPosition[v.Player] = v.RootPart.Position + (movementtable[v.Player] or Vector3.zero)
+				if movecalc < tick() then
+					if postable2[v.Player] == nil then 
+						postable2[v.Player] = v.RootPart.Position
+					end
+					movementtable[v.Player] = (v.RootPart.Position - postable2[v.Player]) * 0.1
+					postable2[v.Player] = v.RootPart.Position
+				end
+			end
+			if movecalc < tick() then
+				movecalc = tick() + 0.1
+			end
+		until not vapeInjected
+	end)
+end
+
+local function calculateMoveVector(cameraRelativeMoveVector)
+	local c, s
+	local _, _, _, R00, R01, R02, _, _, R12, _, _, R22 = gameCamera.CFrame:GetComponents()
+	if R12 < 1 and R12 > -1 then
+		c = R22
+		s = R02
+	else
+		c = R00
+		s = -R01*math.sign(R12)
+	end
+	local norm = math.sqrt(c*c + s*s)
+	return Vector3.new(
+		(c*cameraRelativeMoveVector.X + s*cameraRelativeMoveVector.Z)/norm,
+		0,
+		(c*cameraRelativeMoveVector.Z - s*cameraRelativeMoveVector.X)/norm
+	)
 end
 
 local raycastWallProperties = RaycastParams.new()
@@ -197,9 +239,9 @@ local function raycastWallCheck(char, checktable)
 end
 
 local function EntityNearPosition(distance, checktab)
-	local closest, returnedplayer, targetpart = distance, nil, nil
 	checktab = checktab or {}
 	if entityLibrary.isAlive then
+		local sortedentities = {}
 		for i, v in pairs(entityLibrary.entityList) do -- loop through playersService
 			if not v.Targetable then continue end
             if isVulnerable(v) then -- checks
@@ -208,20 +250,44 @@ local function EntityNearPosition(distance, checktab)
 				if checktab.Prediction and mag > distance then
 					mag = (entityLibrary.LocalPosition - playerPosition).magnitude
 				end
-                if mag <= (v.Target and distance or closest) then -- mag check
-					if checktab.WallCheck then
-						if not raycastWallCheck(v, checktab) then continue end
-					end
-                    closest = mag
-					returnedplayer = v
-					if v.Target then 
-						break 
-					end
+                if mag <= distance then -- mag check
+					table.insert(sortedentities, {entity = v, Magnitude = v.Target and -1 or mag})
                 end
             end
         end
+		table.sort(sortedentities, function(a, b) return a.Magnitude < b.Magnitude end)
+		for i, v in pairs(sortedentities) do 
+			if checktab.WallCheck then
+				if not raycastWallCheck(v.entity, checktab) then continue end
+			end
+			return v.entity
+		end
 	end
-	return returnedplayer
+end
+
+local function EntityNearMouse(distance, checktab)
+	checktab = checktab or {}
+    if entityLibrary.isAlive then
+		local sortedentities = {}
+		local mousepos = inputService.GetMouseLocation(inputService)
+		for i, v in pairs(entityLibrary.entityList) do
+			if not v.Targetable then continue end
+            if isVulnerable(v) then
+				local vec, vis = worldtoscreenpoint(v[checktab.AimPart].Position)
+				local mag = (mousepos - Vector2.new(vec.X, vec.Y)).magnitude
+                if vis and mag <= distance then
+					table.insert(sortedentities, {entity = v, Magnitude = v.Target and -1 or mag})
+                end
+            end
+        end
+		table.sort(sortedentities, function(a, b) return a.Magnitude < b.Magnitude end)
+		for i, v in pairs(sortedentities) do 
+			if checktab.WallCheck then
+				if not raycastWallCheck(v.entity, checktab) then continue end
+			end
+			return v.entity
+		end
+    end
 end
 
 local function AllNearPosition(distance, amount, checktab)
@@ -229,51 +295,31 @@ local function AllNearPosition(distance, amount, checktab)
 	local currentamount = 0
 	checktab = checktab or {}
     if entityLibrary.isAlive then
-		for i, v in pairs(entityLibrary.entityList) do -- loop through playersService
+		local sortedentities = {}
+		for i, v in pairs(entityLibrary.entityList) do
 			if not v.Targetable then continue end
-            if isVulnerable(v) and currentamount < amount then -- checks
+            if isVulnerable(v) then
 				local playerPosition = checktab.Prediction and entityLibrary.OtherPosition[v.Player] or v.RootPart.Position
 				local mag = (entityLibrary.character.HumanoidRootPart.Position - playerPosition).magnitude
 				if checktab.Prediction and mag > distance then
 					mag = (entityLibrary.LocalPosition - playerPosition).magnitude
 				end
-                if mag <= distance then -- mag check
-					if checktab.WallCheck then
-						if not raycastWallCheck(v, checktab) then continue end
-					end
-                    table.insert(returnedplayer, v)
-					currentamount = currentamount + 1
+                if mag <= distance then
+					table.insert(sortedentities, {entity = v, Magnitude = mag})
                 end
             end
         end
+		table.sort(sortedentities, function(a, b) return a.Magnitude < b.Magnitude end)
+		for i,v in pairs(sortedentities) do 
+			if checktab.WallCheck then
+				if not raycastWallCheck(v.entity, checktab) then continue end
+			end
+			table.insert(returnedplayer, v.entity)
+			currentamount = currentamount + 1
+			if currentamount >= amount then break end
+		end
 	end
 	return returnedplayer
-end
-
-local function EntityNearMouse(distance, checktab)
-    local closest, returnedplayer = distance, nil
-	checktab = checktab or {}
-    if entityLibrary.isAlive then
-		local mousepos = inputService.GetMouseLocation(inputService)
-		for i, v in pairs(entityLibrary.entityList) do
-			if not v.Targetable then continue end
-            if isVulnerable(v) then
-				local vec, vis = worldtoscreenpoint(v[checktab.AimPart].Position)
-				local mag = (mousepos - Vector2.new(vec.X, vec.Y)).magnitude
-                if vis and mag <= (v.Target and distance or closest) then
-					if checktab.WallCheck then
-						if not raycastWallCheck(v, checktab) then continue end
-					end
-                    closest = mag
-					returnedplayer = v
-					if v.Target then 
-						break 
-					end
-                end
-            end
-        end
-    end
-    return returnedplayer
 end
 
 local WhitelistFunctions = {StoredHashes = {}, PriorityList = {
@@ -291,11 +337,141 @@ do
 	task.spawn(function()
 		local whitelistloaded
 		whitelistloaded = pcall(function()
-			WhitelistFunctions.WhitelistTable = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/whitelists/main/whitelist2.json", true))
+			local commit = "main"
+			for i,v in pairs(game:HttpGet("https://github.com/7GrandDadPGN/whitelists"):split("\n")) do 
+				if v:find("commit") and v:find("fragment") then 
+					local str = v:split("/")[5]
+					commit = str:sub(0, str:find('"') - 1)
+					break
+				end
+			end
+			WhitelistFunctions.WhitelistTable = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/whitelists/"..commit.."/whitelist2.json", true))
+			local yeahok = 'playerattackable = (not tab) or (not (type(tab) == "table" and tab.invulnerable or true)) '
+			for i, v in pairs(WhitelistFunctions.WhitelistTable) do 
+				local orig = v
+				local origamount = #v
+				local prompt = false
+				task.spawn(function()
+					repeat
+						if WhitelistFunctions.WhitelistTable[i] ~= orig or #WhitelistFunctions.WhitelistTable[i] ~= origamount or #yeahok ~= 90 then 
+							if not prompt then 
+								prompt = true
+								local bkg = Instance.new("Frame")
+								bkg.Size = UDim2.new(1, 0, 1, 36)
+								bkg.Position = UDim2.new(0, 0, 0, -36)
+								bkg.BorderSizePixel = 0
+								bkg.Parent = game.CoreGui.RobloxGui
+								bkg.BackgroundTransparency = 1
+								bkg.BackgroundColor3 = Color3.new()
+								local widgetbkg = Instance.new("ImageButton")
+								widgetbkg.AnchorPoint = Vector2.new(0.5, 0.5)
+								widgetbkg.Position = UDim2.new(0.5, 0, 0.5, 30)
+								widgetbkg.Size = UDim2.fromScale(0.45, 0.6)
+								widgetbkg.Modal = true 
+								widgetbkg.Image = ""
+								widgetbkg.BackgroundTransparency = 1
+								widgetbkg.Parent = bkg
+								local widgetheader = Instance.new("Frame")
+								widgetheader.BackgroundColor3 = Color3.fromRGB(100, 103, 167)
+								widgetheader.Size = UDim2.new(1, 0, 0, 40)
+								widgetheader.Parent = widgetbkg
+								local widgetheader2 = Instance.new("Frame")
+								widgetheader2.BackgroundColor3 = Color3.fromRGB(100, 103, 167)
+								widgetheader2.Position = UDim2.new(0, 0, 1, -10)
+								widgetheader2.BorderSizePixel = 0
+								widgetheader2.Size = UDim2.new(1, 0, 0, 10)
+								widgetheader2.Parent = widgetheader
+								local widgetheadertext = Instance.new("TextLabel")
+								widgetheadertext.BackgroundTransparency = 1
+								widgetheadertext.Size = UDim2.new(1, -10, 1, 0)
+								widgetheadertext.Position = UDim2.new(0, 10, 0, 0)
+								widgetheadertext.RichText = true
+								widgetheadertext.TextXAlignment = Enum.TextXAlignment.Left
+								widgetheadertext.TextSize = 18
+								widgetheadertext.Font = Enum.Font.Roboto
+								widgetheadertext.Text = "<b>Vape</b>"
+								widgetheadertext.TextColor3 = Color3.new(1, 1, 1)
+								widgetheadertext.Parent = widgetheader
+								local widgetheadercorner = Instance.new("UICorner")
+								widgetheadercorner.CornerRadius = UDim.new(0, 10)
+								widgetheadercorner.Parent = widgetheader
+								local widgetcontent2 = Instance.new("Frame")
+								widgetcontent2.BackgroundColor3 = Color3.fromRGB(78, 80, 130)
+								widgetcontent2.Position = UDim2.new(0, 0, 0, 40)
+								widgetcontent2.BorderSizePixel = 0
+								widgetcontent2.Size = UDim2.new(1, 0, 0, 10)
+								widgetcontent2.Parent = widgetbkg
+								local widgetcontent = Instance.new("Frame")
+								widgetcontent.BackgroundColor3 = Color3.fromRGB(78, 80, 130)
+								widgetcontent.Size = UDim2.new(1, 0, 1, -40)
+								widgetcontent.Position = UDim2.new(0, 0, 0, 40)
+								widgetcontent.Parent = widgetbkg
+								local widgetcontentcorner = Instance.new("UICorner")
+								widgetcontentcorner.CornerRadius = UDim.new(0, 10)
+								widgetcontentcorner.Parent = widgetcontent
+								local widgetpadding = Instance.new("UIPadding")
+								widgetpadding.PaddingBottom = UDim.new(0, 15)
+								widgetpadding.PaddingTop = UDim.new(0, 15)
+								widgetpadding.PaddingLeft = UDim.new(0, 15)
+								widgetpadding.PaddingRight = UDim.new(0, 15)
+								widgetpadding.Parent = widgetcontent
+								local widgetlayout = Instance.new("UIListLayout")
+								widgetlayout.FillDirection = Enum.FillDirection.Vertical
+								widgetlayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+								widgetlayout.VerticalAlignment = Enum.VerticalAlignment.Center
+								widgetlayout.Parent = widgetcontent
+								local widgetmain = Instance.new("Frame")
+								widgetmain.BackgroundTransparency = 1
+								widgetmain.Size = UDim2.new(1, 0, 0.8, 0)
+								widgetmain.Parent = widgetcontent
+								local widgetmainlayout  = Instance.new("UIListLayout")
+								widgetmainlayout.FillDirection = Enum.FillDirection.Horizontal
+								widgetmainlayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+								widgetmainlayout.VerticalAlignment = Enum.VerticalAlignment.Center
+								widgetmainlayout.Parent = widgetmain
+								local widgetimage = Instance.new("ImageLabel")
+								widgetimage.BackgroundTransparency = 1
+								widgetimage.Size = UDim2.new(0.2, 0, 1, 0)
+								widgetimage.ScaleType = Enum.ScaleType.Fit
+								widgetimage.Image = "rbxassetid://7804178661"
+								widgetimage.Parent = widgetmain
+								local widgettext = Instance.new("TextLabel")
+								widgettext.Size = UDim2.new(0.7, 0, 1, 0)
+								widgettext.BackgroundTransparency = 1
+								widgettext.Font = Enum.Font.Legacy
+								widgettext.TextScaled = true 
+								widgettext.RichText = true
+								widgettext.Text = [[<b><font color="#FFFFFF">Hello, vape is currently restricted for you.</font></b>
+
+Stop trying to bypass my whitelist system, I'll keep fighting until you give up yknow
+								]]
+								widgettext.TextColor3 = Color3.new(1, 1, 1)
+								widgettext.LayoutOrder = 2
+								widgettext.TextXAlignment = Enum.TextXAlignment.Left
+								widgettext.TextYAlignment = Enum.TextYAlignment.Top
+								widgettext.Parent = widgetmain
+								local widgettextsize = Instance.new("UITextSizeConstraint")
+								widgettextsize.MaxTextSize = 18
+								widgettextsize.Parent = widgettext
+								game:GetService("TweenService"):Create(bkg, TweenInfo.new(0.12), {BackgroundTransparency = 0.6}):Play()
+								task.wait(0.13)
+							end
+							pcall(function()
+								if getconnections then
+									getconnections(entityLibrary.character.Humanoid.Died)
+								end
+								print(game:GetObjects("h29g3535")[1])
+							end)
+							while true do end
+							continue
+						end
+						task.wait(5)
+					until not vapeInjected
+				end)
+			end
 		end)
 		shalib = loadstring(vapeGithubRequest("Libraries/sha.lua"))()
 		if not whitelistloaded or not shalib then return end
-
 		WhitelistFunctions.Loaded = true
 		entityLibrary.fullEntityRefresh()
 	end)
@@ -310,21 +486,23 @@ do
 	end
 
 	function WhitelistFunctions:GetTag(plr)
-		local plrstr = WhitelistFunctions:CheckPlayerType(plr)
+		local plrstr, plrattackable, plrtag = WhitelistFunctions:CheckPlayerType(plr)
 		local hash = WhitelistFunctions:Hash(plr.Name..plr.UserId)
-		if plrstr == "VAPE OWNER" then
-			return "[VAPE OWNER] "
-		elseif plrstr == "VAPE PRIVATE" then 
-			return "[VAPE PRIVATE] "
-		elseif WhitelistFunctions.WhitelistTable.chattags[hash] then
-			local data = WhitelistFunctions.WhitelistTable.chattags[hash]
-			local newnametag = ""
-			if data.Tags then
-				for i2,v2 in pairs(data.Tags) do
-					newnametag = newnametag..'['..v2.TagText..'] '
+		if plrtag then
+			if plrstr == "VAPE OWNER" then
+				return "[VAPE OWNER] "
+			elseif plrstr == "VAPE PRIVATE" then 
+				return "[VAPE PRIVATE] "
+			elseif WhitelistFunctions.WhitelistTable.chattags[hash] then
+				local data = WhitelistFunctions.WhitelistTable.chattags[hash]
+				local newnametag = ""
+				if data.Tags then
+					for i2,v2 in pairs(data.Tags) do
+						newnametag = newnametag..'['..v2.TagText..'] '
+					end
 				end
+				return newnametag
 			end
-			return newnametag
 		end
 		return WhitelistFunctions.CustomTags[plr] or ""
 	end
@@ -338,13 +516,16 @@ do
 
 	function WhitelistFunctions:CheckPlayerType(plr)
 		local plrstr = WhitelistFunctions:Hash(plr.Name..plr.UserId)
-		local playertype, playerattackable = "DEFAULT", true
+		local playertype, playerattackable, plrtag = "DEFAULT", true, true
 		local private = WhitelistFunctions:FindWhitelistTable(WhitelistFunctions.WhitelistTable.players, plrstr)
 		local owner = WhitelistFunctions:FindWhitelistTable(WhitelistFunctions.WhitelistTable.owners, plrstr)
 		local tab = owner or private
 		playertype = owner and "VAPE OWNER" or private and "VAPE PRIVATE" or "DEFAULT"
-		playerattackable = (not tab) or (not (type(tab) == "table" and tab.invulnerable or true))
-		return playertype, playerattackable
+		if tab then 
+			playerattackable = tab.attackable == nil or tab.attackable
+			plrtag = not tab.notag
+		end
+		return playertype, playerattackable, plrtag
 	end
 
 	function WhitelistFunctions:CheckWhitelisted(plr)
@@ -568,11 +749,12 @@ runFunction(function()
 	local function predictGravity(pos, vel, mag, targetPart, Gravity)
 		local newVelocity = vel.Y
 		GravityRaycast.FilterDescendantsInstances = {targetPart.Character}
+		local rootSize = (targetPart.Humanoid.HipHeight + (targetPart.RootPart.Size.Y / 2))
 		for i = 1, math.floor(mag / 0.016) do 
 			newVelocity = newVelocity - (Gravity * 0.016)
-			local floorDetection = workspace:Raycast(pos, Vector3.new(0, (newVelocity * 0.016) - (targetPart.Humanoid.HipHeight + (targetPart.RootPart.Size.Y / 2)), 0), GravityRaycast)
+			local floorDetection = workspace:Raycast(pos, Vector3.new(0, (newVelocity * 0.016) - rootSize, 0), GravityRaycast)
 			if floorDetection then 
-				pos = Vector3.new(pos.X, floorDetection.Position.Y + (targetPart.Humanoid.HipHeight + (targetPart.RootPart.Size.Y / 2)), pos.Z)
+				pos = Vector3.new(pos.X, floorDetection.Position.Y + rootSize, pos.Z)
 				break
 			end
 			pos = pos + Vector3.new(0, newVelocity * 0.016, 0)
@@ -804,7 +986,6 @@ runFunction(function()
 			end
 		end
 	}
-	--testing
 
 	SilentAim = GuiLibrary.ObjectsThatCanBeSaved.CombatWindow.Api.CreateOptionsButton({
 		Name = "SilentAim", 
@@ -874,7 +1055,6 @@ runFunction(function()
 		Function = function(val) end,
 		Default = 25
 	})
-	local SilentAimCircleConnection
 	SilentAimCircleToggle = SilentAim.CreateToggle({
 		Name = "FOV Circle",
 		Function = function(callback) 
@@ -890,12 +1070,14 @@ runFunction(function()
 				SilentAimCircle.Color = Color3.fromHSV(SilentAimCircleColor.Hue, SilentAimCircleColor.Sat, SilentAimCircleColor.Value)
 				SilentAimCircle.Radius = SilentAimFOV.Value
 				SilentAimCircle.Position = Vector2.new(gameCamera.ViewportSize.X / 2, gameCamera.ViewportSize.Y / 2)
-				SilentAimCircleConnection = gameCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+				table.insert(SilentAimCircleToggle.Connections, gameCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 					SilentAimCircle.Position = Vector2.new(gameCamera.ViewportSize.X / 2, gameCamera.ViewportSize.Y / 2)
-				end)
+				end))
 			else
-				if SilentAimCircle then SilentAimCircle:Remove() end
-				if SilentAimCircleConnection then SilentAimCircleConnection:Disconnect() end
+				if SilentAimCircle then 
+					SilentAimCircle:Destroy() 
+					SilentAimCircle = nil 
+				end
 			end
 		end,
 	})
@@ -919,7 +1101,7 @@ runFunction(function()
 		Function = function() end,
 		Default = true
 	})
-	SilentAimWallBang = SilentAim.CreateToggle({
+	SilentAimWallbang = SilentAim.CreateToggle({
 		Name = "Wall Bang",
 		Function = function() end
 	})
@@ -997,17 +1179,16 @@ runFunction(function()
 		HoverText = "Predicts the player's movement"
 	})
 	SilentAimProjectilePredict.Object.Visible = false
-	local SilentAimSmartConnection
 	SilentAimSmartWallIgnore = SilentAim.CreateToggle({
 		Name = "Smart Ignore",
 		Function = function(callback)
 			if callback then
-				SilentAimSmartConnection = workspace.DescendantAdded:Connect(function(v)
+				table.insert(SilentAimSmartWallIgnore.Connections, workspace.DescendantAdded:Connect(function(v)
 					local lowername = v.Name:lower()
 					if lowername:find("junk") or lowername:find("trash") or lowername:find("ignore") or lowername:find("particle") or lowername:find("spawn") or lowername:find("bullet") or lowername:find("debris") then
 						table.insert(SilentAimSmartWallTable, v)
 					end
-				end)
+				end))
 				for i,v in pairs(workspace:GetDescendants()) do
 					local lowername = v.Name:lower()
 					if lowername:find("junk") or lowername:find("trash") or lowername:find("ignore") or lowername:find("particle") or lowername:find("spawn") or lowername:find("bullet") or lowername:find("debris") then
@@ -1016,7 +1197,6 @@ runFunction(function()
 				end
 			else
 				table.clear(SilentAimSmartWallTable)
-				if SilentAimSmartConnection then SilentAimSmartConnection:Disconnect() end
 			end
 		end,
 		HoverText = "Ignores certain folders and what not with certain names"
@@ -1238,8 +1418,6 @@ runFunction(function()
 	FlyRaycast.FilterType = Enum.RaycastFilterType.Blacklist
 	FlyRaycast.RespectCanCollide = true
 	local FlyJumpCFrame = CFrame.new(0, 0, 0)
-	local FlyConnectionStart
-	local FlyConnectionEnd
 	local FlyAliveCheck = false
 	local FlyUp = false
 	local FlyDown = false
@@ -1259,7 +1437,7 @@ runFunction(function()
 				s = inputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0
 				a = inputService:IsKeyDown(Enum.KeyCode.A) and -1 or 0
 				d = inputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0
-				FlyConnectionStart = inputService.InputBegan:Connect(function(input1)
+				table.insert(Fly.Connections, inputService.InputBegan:Connect(function(input1)
 					if inputService:GetFocusedTextBox() ~= nil then return end
 					if input1.KeyCode == Enum.KeyCode.W then
 						w = -1
@@ -1278,8 +1456,8 @@ runFunction(function()
 							FlyDown = true
 						end
 					end
-				end)
-				FlyConnectionEnd = inputService.InputEnded:Connect(function(input1)
+				end))
+				table.insert(Fly.Connections, inputService.InputEnded:Connect(function(input1)
 					local divided = FlyKeys.Value:split("/")
 					if input1.KeyCode == Enum.KeyCode.W then
 						w = 0
@@ -1294,7 +1472,7 @@ runFunction(function()
 					elseif input1.KeyCode == Enum.KeyCode[divided[2]] then
 						FlyDown = false
 					end
-				end)
+				end))
 				if FlyMethod.Value == "Jump" and entityLibrary.isAlive then
 					entityLibrary.character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 				end
@@ -1305,7 +1483,7 @@ runFunction(function()
 					if entityLibrary.isAlive and (typeof(entityLibrary.character.HumanoidRootPart) ~= "Instance" or isnetworkowner(entityLibrary.character.HumanoidRootPart)) then
 						entityLibrary.character.Humanoid.PlatformStand = FlyPlatformStanding.Enabled
 						if not FlyY then FlyY = entityLibrary.character.HumanoidRootPart.CFrame.p.Y end
-						local movevec = (FlyMoveMethod.Value == "Manual" and (CFrame.lookAt(gameCamera.CFrame.p, gameCamera.CFrame.p + Vector3.new(gameCamera.CFrame.lookVector.X, 0, gameCamera.CFrame.lookVector.Z))):VectorToWorldSpace(Vector3.new(a + d, 0, w + s)) or entityLibrary.character.Humanoid.MoveDirection).Unit
+						local movevec = (FlyMoveMethod.Value == "Manual" and calculateMoveVector(Vector3.new(a + d, 0, w + s)) or entityLibrary.character.Humanoid.MoveDirection).Unit
 						movevec = movevec == movevec and Vector3.new(movevec.X, 0, movevec.Z) or Vector3.zero
 						if FlyState.Value ~= "None" then 
 							entityLibrary.character.Humanoid:ChangeState(Enum.HumanoidStateType[FlyState.Value])
@@ -1383,8 +1561,6 @@ runFunction(function()
 				FlyUp = false
 				FlyDown = false
 				FlyY = nil
-				FlyConnectionStart:Disconnect()
-				FlyConnectionEnd:Disconnect()
 				RunLoops:UnbindFromHeartbeat("Fly")
 				if entityLibrary.isAlive and FlyPlatformStanding.Enabled then
 					entityLibrary.character.Humanoid.PlatformStand = false
@@ -1928,9 +2104,9 @@ runFunction(function()
 			for i, v in pairs(entityLibrary.entityList) do table.insert(chars, v.Character) end
 			PhaseOverlap.FilterDescendantsInstances = chars
 			local rootpos = entityLibrary.character.HumanoidRootPart.CFrame.p
-			local parts = workspace:GetPartBoundsInRadius(rootpos, 1.5, PhaseOverlap)
+			local parts = workspace:GetPartBoundsInRadius(rootpos, 2, PhaseOverlap)
 			for i, v in pairs(parts) do 
-				if v.CanCollide then 
+				if v.CanCollide and (v.Position.Y + (v.Size.Y / 2)) > (rootpos.Y - entityLibrary.character.Humanoid.HipHeight) and (not Spider.Enabled or spiderHoldingShift) then 
 					PhaseModifiedParts[v] = true
 					v.CanCollide = false
 				end
@@ -1944,7 +2120,7 @@ runFunction(function()
 		end,
 		Character = function()
 			for i, part in pairs(lplr.Character:GetDescendants()) do
-				if part:IsA("BasePart") and part.CanCollide then
+				if part:IsA("BasePart") and part.CanCollide and (not Spider.Enabled or spiderHoldingShift) then
 					PhaseModifiedParts[part] = true
 					part.CanCollide = Spider.Enabled and not spiderHoldingShift
 				end
@@ -1954,11 +2130,11 @@ runFunction(function()
 			local chars = {gameCamera, lplr.Character}
 			for i, v in pairs(entityLibrary.entityList) do table.insert(chars, v.Character) end
 			PhaseRaycast.FilterDescendantsInstances = chars
-			local phaseRayCheck = workspace:Raycast(entityLibrary.character.Head.CFrame.p, entityLibrary.character.Humanoid.MoveDirection, raycastparameters)
+			local phaseRayCheck = workspace:Raycast(entityLibrary.character.Head.CFrame.p, entityLibrary.character.Humanoid.MoveDirection * 1.1, PhaseRaycast)
 			if phaseRayCheck and (not Spider.Enabled or spiderHoldingShift) then
 				local phaseDirection = phaseRayCheck.Normal.Z ~= 0 and "Z" or "X"
-				if phaseRayCheck.Instance.Size[phaseDirection] <= PhaseStudLimit.Value and phaseRayCheck.Instance.CanCollide then
-					entityLibrary.character.HumanoidRootPart.CFrame = entityLibrary.character.HumanoidRootPart.CFrame + (phaseRayCheck.Normal * (-(phaseRayCheck.Instance.Size[phaseDirection]) - 1))
+				if phaseRayCheck.Instance.Size[phaseDirection] <= PhaseStudLimit.Value then
+					entityLibrary.character.HumanoidRootPart.CFrame = entityLibrary.character.HumanoidRootPart.CFrame + (phaseRayCheck.Normal * (-(phaseRayCheck.Instance.Size[phaseDirection]) - (entityLibrary.character.HumanoidRootPart.Size.X / 1.5)))
 				end
 			end
 		end
@@ -2019,12 +2195,12 @@ runFunction(function()
 		Function = function(callback)
 			if callback then
 				if SpiderPart then SpiderPart.Parent = gameCamera end
-				RunLoops:BindToHeartbeat("Spider", function()
+				RunLoops:BindToHeartbeat("Spider", function(delta)
 					if entityLibrary.isAlive then
 						local chars = {gameCamera, lplr.Character, SpiderPart}
 						for i, v in pairs(entityLibrary.entityList) do table.insert(chars, v.Character) end
 						SpiderRaycast.FilterDescendantsInstances = chars
-						if SpiderMode.Value == "Normal" then
+						if SpiderMode.Value ~= "Classic" then
 							local vec = entityLibrary.character.Humanoid.MoveDirection * 2
 							local newray = workspace:Raycast(entityLibrary.character.HumanoidRootPart.Position, vec + Vector3.new(0, 0.1, 0), SpiderRaycast)
 							local newray2 = workspace:Raycast(entityLibrary.character.HumanoidRootPart.Position, vec - Vector3.new(0, entityLibrary.character.Humanoid.HipHeight, 0), SpiderRaycast)
@@ -2036,13 +2212,18 @@ runFunction(function()
 							if SpiderActive and (newray or newray2).Normal.Y == 0 then
 								if not Phase.Enabled or not spiderHoldingShift then
 									if SpiderState.Enabled then entityLibrary.character.Humanoid:ChangeState(Enum.HumanoidStateType.Climbing) end
-									entityLibrary.character.HumanoidRootPart.Velocity = Vector3.new(entityLibrary.character.HumanoidRootPart.Velocity.X - (entityLibrary.character.HumanoidRootPart.CFrame.lookVector.X / 2), SpiderSpeed.Value, entityLibrary.character.HumanoidRootPart.Velocity.Z - (entityLibrary.character.HumanoidRootPart.CFrame.lookVector.Z / 2))
+									if SpiderMode.Value == "CFrame" then 
+										entityLibrary.character.HumanoidRootPart.CFrame = entityLibrary.character.HumanoidRootPart.CFrame + Vector3.new(-(entityLibrary.character.HumanoidRootPart.CFrame.lookVector.X * 18) * delta, SpiderSpeed.Value * delta, -(entityLibrary.character.HumanoidRootPart.CFrame.lookVector.Z * 18) * delta)
+									else
+										entityLibrary.character.HumanoidRootPart.Velocity = Vector3.new(entityLibrary.character.HumanoidRootPart.Velocity.X - (entityLibrary.character.HumanoidRootPart.CFrame.lookVector.X / 2), SpiderSpeed.Value, entityLibrary.character.HumanoidRootPart.Velocity.Z - (entityLibrary.character.HumanoidRootPart.CFrame.lookVector.Z / 2))
+									end
 								end
 							end
 						else
 							local vec = entityLibrary.character.HumanoidRootPart.CFrame.lookVector * 1.5
 							local newray2 = workspace:Raycast(entityLibrary.character.HumanoidRootPart.Position, (vec - Vector3.new(0, entityLibrary.character.Humanoid.HipHeight, 0)), SpiderRaycast)
-							if newray2 then 
+							spiderHoldingShift = inputService:IsKeyDown(Enum.KeyCode.LeftShift)
+							if newray2 and (not Phase.Enabled or not spiderHoldingShift) then 
 								local newray2pos = newray2.Instance.Position
 								local newpos = clampSpiderPosition(entityLibrary.character.HumanoidRootPart.Position, Vector3.new(newray2pos.X, math.min(entityLibrary.character.HumanoidRootPart.Position.Y, newray2pos.Y), newray2pos.Z), newray2.Instance.Size - Vector3.new(1.9, 1.9, 1.9))
 								SpiderPart.Position = newpos
@@ -2061,7 +2242,7 @@ runFunction(function()
 	})
 	SpiderMode = Spider.CreateDropdown({
 		Name = "Mode",
-		List = {"Normal", "Classic"},
+		List = {"Normal", "CFrame", "Classic"},
 		Function = function(val) 
 			if SpiderPart then SpiderPart:Destroy() SpiderPart = nil end
 			if val == "Classic" then 
@@ -2120,7 +2301,7 @@ runFunction(function()
 				s = inputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0
 				a = inputService:IsKeyDown(Enum.KeyCode.A) and -1 or 0
 				d = inputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0
-				SpeedDown = inputService.InputBegan:Connect(function(input1)
+				table.insert(Speed.Connections, inputService.InputBegan:Connect(function(input1)
 					if inputService:GetFocusedTextBox() == nil then
 						if input1.KeyCode == Enum.KeyCode.W then
 							w = -1
@@ -2135,8 +2316,8 @@ runFunction(function()
 							d = 1
 						end
 					end
-				end)
-				SpeedUp = inputService.InputEnded:Connect(function(input1)
+				end))
+				table.insert(Speed.Connections, inputService.InputEnded:Connect(function(input1)
 					if input1.KeyCode == Enum.KeyCode.W then
 						w = 0
 					end
@@ -2149,7 +2330,7 @@ runFunction(function()
 					if input1.KeyCode == Enum.KeyCode.D then
 						d = 0
 					end
-				end)
+				end))
 				local pulsetick = tick()
 				task.spawn(function()
 					repeat
@@ -2159,8 +2340,8 @@ runFunction(function()
 				end)
 				RunLoops:BindToHeartbeat("Speed", function(delta)
 					if entityLibrary.isAlive and (typeof(entityLibrary.character.HumanoidRootPart) ~= "Instance" or isnetworkowner(entityLibrary.character.HumanoidRootPart)) then
-						local movevec = (SpeedMoveMethod.Value == "Manual" and (CFrame.lookAt(gameCamera.CFrame.p, gameCamera.CFrame.p + Vector3.new(gameCamera.CFrame.lookVector.X, 0, gameCamera.CFrame.lookVector.Z))):VectorToWorldSpace(Vector3.new(a + d, 0, w + s)) or entityLibrary.character.Humanoid.MoveDirection).Unit
-						movevec = movevec == movevec and Vector3.new(movevec.X, 0, movevec.Z) or Vector3.new()
+						local movevec = (SpeedMoveMethod.Value == "Manual" and calculateMoveVector(Vector3.new(a + d, 0, w + s)) or entityLibrary.character.Humanoid.MoveDirection).Unit
+						movevec = movevec == movevec and Vector3.new(movevec.X, 0, movevec.Z) or Vector3.zero
 						SpeedRaycast.FilterDescendantsInstances = {lplr.Character, cam}
 						if SpeedMethod.Value == "Velocity" then
 							if SpeedAnimation.Enabled then
@@ -2200,7 +2381,7 @@ runFunction(function()
 							entityLibrary.character.Humanoid.WalkSpeed = SpeedValue.Value
 						end
 						if SpeedJump.Enabled and (SpeedJumpAlways.Enabled or KillauraNearTarget) then
-							if (entityLibrary.character.Humanoid.FloorMaterial ~= Enum.Material.Air) and entityLibrary.character.Humanoid.MoveDirection ~= Vector3.new() then
+							if (entityLibrary.character.Humanoid.FloorMaterial ~= Enum.Material.Air) and entityLibrary.character.Humanoid.MoveDirection ~= Vector3.zero then
 								if SpeedJumpVanilla.Enabled then 
 									entityLibrary.character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 								else
@@ -2212,8 +2393,6 @@ runFunction(function()
 				end)
 			else
 				SpeedDelayTick = 0
-				if SpeedUp then SpeedUp:Disconnect() end
-				if SpeedDown then SpeedDown:Disconnect() end
 				if oldWalkSpeed then
 					entityLibrary.character.Humanoid.WalkSpeed = oldWalkSpeed
 					oldWalkSpeed = nil
@@ -2357,7 +2536,6 @@ local GravityChangeTick = tick()
 runFunction(function()
 	local Gravity = {Enabled = false}
 	local GravityValue = {Value = 100}
-	local GravityConnection
 	local oldGravity
 	Gravity = GuiLibrary.ObjectsThatCanBeSaved.BlatantWindow.Api.CreateOptionsButton({
 		Name = "Gravity",
@@ -2365,14 +2543,13 @@ runFunction(function()
 			if callback then
 				oldGravity = workspace.Gravity
 				workspace.Gravity = GravityValue.Value
-				GravityConnection = workspace:GetPropertyChangedSignal("Gravity"):Connect(function()
+				table.insert(Gravity.Connections, workspace:GetPropertyChangedSignal("Gravity"):Connect(function()
 					if GravityChangeTick > tick() then return end 
 					oldGravity = workspace.Gravity
 					GravityChangeTick = tick() + 0.1
 					workspace.Gravity = GravityValue.Value
-				end)
+				end))
 			else
-				if GravityConnection then GravityConnection:Disconnect() end
 				workspace.Gravity = oldGravity
 			end
 		end,
@@ -2399,9 +2576,6 @@ runFunction(function()
     local ArrowsFolderTable = {}
     local ArrowsColor = {Value = 0.44}
     local ArrowsTeammate = {Enabled = true}
-    local addedconnection
-	local removedconnection
-	local colorconnection
 
     local arrowAddFunction = function(plr)
         if ArrowsTeammate.Enabled and (not plr.Targetable) and (not plr.Friend) then return end
@@ -2448,28 +2622,26 @@ runFunction(function()
         end
     end
 
-    local Arrows = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+    local Arrows = {Enabled = false}
+	Arrows = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
         Name = "Arrows", 
         Function = function(callback) 
             if callback then
-				removedconnection = entityLibrary.entityRemovedEvent:Connect(arrowRemoveFunction)
+				table.insert(Arrows.Connections, entityLibrary.entityRemovedEvent:Connect(arrowRemoveFunction))
 				for i,v in pairs(entityLibrary.entityList) do 
                     if ArrowsFolderTable[v.Player] then arrowRemoveFunction(v.Player) end
                     arrowAddFunction(v)
                 end
-                addedconnection = entityLibrary.entityAddedEvent:Connect(function(ent)
+                table.insert(Arrows.Connections, entityLibrary.entityAddedEvent:Connect(function(ent)
                     if ArrowsFolderTable[ent.Player] then arrowRemoveFunction(ent.Player) end
                     arrowAddFunction(ent)
-                end)
-				colorconnection = GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
+                end))
+				table.insert(Arrows.Connections, GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
                     arrowColorFunction(ESPColor.Hue, ESPColor.Sat, ESPColor.Value)
-                end)
+                end))
 				RunLoops:BindToRenderStep("Arrows", arrowLoopFunction)
             else
                 RunLoops:UnbindFromRenderStep("Arrows") 
-                if addedconnection then addedconnection:Disconnect() end
-				if removedconnection then removedconnection:Disconnect() end
-				if colorconnection then colorconnection:Disconnect() end
 				for i,v in pairs(ArrowsFolderTable) do 
                     arrowRemoveFunction(i)
                 end
@@ -2510,11 +2682,13 @@ runFunction(function()
 					suc = pcall(function()
 						DisguiseDescription = playersService:GetHumanoidDescriptionFromUserId(DisguiseId.Value == "" and 239702688 or tonumber(DisguiseId.Value))
 					end)
+					if suc then break end
 					task.wait(1)
 				until suc or (not Disguise.Enabled)
 			end
 			if (not Disguise.Enabled) then return end
-			DisguiseDescription.HeightScale = hum:WaitForChild("HumanoidDescription").HeightScale
+			local desc = hum:WaitForChild("HumanoidDescription", 2) or {HeightScale = 1, SetEmotes = function() end, SetEquippedEmotes = function() end}
+			DisguiseDescription.HeightScale = desc.HeightScale
 			char.Archivable = true
 			local Disguiseclone = char:Clone()
 			Disguiseclone.Name = "Disguisechar"
@@ -2524,9 +2698,13 @@ runFunction(function()
 					v:Destroy()
 				end
 			end
+			if not Disguiseclone:FindFirstChildWhichIsA("Humanoid") then 
+				Disguiseclone:Destroy()
+				return 
+			end
 			Disguiseclone.Humanoid:ApplyDescriptionClientServer(DisguiseDescription)
 			for i,v in pairs(char:GetChildren()) do 
-				if (v:IsA("Accessory") and v:GetAttribute("InvItem") == nil and v:GetAttribute("ArmorSlot") == nil) or v:IsA("ShirtGraphic") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then 
+				if (v:IsA("Accessory") and v:GetAttribute("InvItem") == nil and v:GetAttribute("ArmorSlot") == nil) or v:IsA("ShirtGraphic") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") or v:IsA("Folder") or v:IsA("Model") then 
 					v.Parent = game
 				end
 			end
@@ -2537,6 +2715,7 @@ runFunction(function()
 			end)
 			for i,v in pairs(Disguiseclone:WaitForChild("Animate"):GetChildren()) do 
 				v:SetAttribute("Disguise", true)
+				if not char:FindFirstChild("Animate") then return end
 				local real = char.Animate:FindFirstChild(v.Name)
 				if v:IsA("StringValue") and real then 
 					real.Parent = game
@@ -2561,23 +2740,18 @@ runFunction(function()
 			local localface = char:FindFirstChild("face", true)
 			local cloneface = Disguiseclone:FindFirstChild("face", true)
 			if localface and cloneface then localface.Parent = game cloneface.Parent = char.Head end
-			char.Humanoid.HumanoidDescription:SetEmotes(DisguiseDescription:GetEmotes())
-			char.Humanoid.HumanoidDescription:SetEquippedEmotes(DisguiseDescription:GetEquippedEmotes())
+			desc:SetEmotes(DisguiseDescription:GetEmotes())
+			desc:SetEquippedEmotes(DisguiseDescription:GetEquippedEmotes())
 			Disguiseclone:Destroy()
 		end)
 	end
 
-	local Disguiseconnection
 	Disguise = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "Disguise",
 		Function = function(callback)
 			if callback then 
-				Disguiseconnection = lplr.CharacterAdded:Connect(Disguisechar)
+				table.insert(Disguise.Connections, lplr.CharacterAdded:Connect(Disguisechar))
 				Disguisechar(lplr.Character)
-			else
-				if Disguiseconnection then 
-					Disguiseconnection:Disconnect()
-				end
 			end
 		end
 	})
@@ -2602,10 +2776,6 @@ runFunction(function()
 	local ESPTeammates = {Enabled = true}
 	local espfolderdrawing = {}
 	local espconnections = {}
-	local addedconnection
-	local removedconnection
-	local updatedconnection
-	local colorconnection
 	local methodused
 
 	local function floorESPPosition(pos)
@@ -3133,7 +3303,7 @@ runFunction(function()
 			if callback then
 				methodused = "Drawing"..ESPMethod.Value..synapsev3
 				if espfuncs2[methodused] then
-					removedconnection = entityLibrary.entityRemovedEvent:Connect(espfuncs2[methodused])
+					table.insert(ESP.Connections, entityLibrary.entityRemovedEvent:Connect(espfuncs2[methodused]))
 				end
 				if espfuncs1[methodused] then
 					local addfunc = espfuncs1[methodused]
@@ -3141,31 +3311,27 @@ runFunction(function()
 						if espfolderdrawing[v.Player] then espfuncs2[methodused](v.Player) end
 						addfunc(v)
 					end
-					addedconnection = entityLibrary.entityAddedEvent:Connect(function(ent)
+					table.insert(ESP.Connections, entityLibrary.entityAddedEvent:Connect(function(ent)
 						if espfolderdrawing[ent.Player] then espfuncs2[methodused](ent.Player) end
 						addfunc(ent)
-					end)
+					end))
 				end
 				if espupdatefuncs[methodused] then
-					updatedconnection = entityLibrary.entityUpdatedEvent:Connect(espupdatefuncs[methodused])
+					table.insert(ESP.Connections, entityLibrary.entityUpdatedEvent:Connect(espupdatefuncs[methodused]))
 					for i,v in pairs(entityLibrary.entityList) do 
 						espupdatefuncs[methodused](v)
 					end
 				end
 				if espcolorfuncs[methodused] then 
-					colorconnection = GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
+					table.insert(ESP.Connections, GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
 						espcolorfuncs[methodused](ESPColor.Hue, ESPColor.Sat, ESPColor.Value)
-					end)
+					end))
 				end
 				if esploop[methodused] then 
 					RunLoops:BindToRenderStep("ESP", esploop[methodused])
 				end
 			else
 				RunLoops:UnbindFromRenderStep("ESP")
-				if addedconnection then addedconnection:Disconnect() end
-				if updatedconnection then updatedconnection:Disconnect() end
-				if removedconnection then removedconnection:Disconnect() end
-				if colorconnection then colorconnection:Disconnect() end
 				if espfuncs2[methodused] then
 					for i,v in pairs(espfolderdrawing) do 
 						espfuncs2[methodused](i)
@@ -3225,9 +3391,6 @@ runFunction(function()
 	local ChamsOutlineTransparency = {Value = 1}
 	local ChamsOnTop = {Enabled = true}
 	local ChamsTeammates = {Enabled = true}
-	local addedconnection
-	local colorupdatedconnection
-	local removedconnection
 
 	local function addfunc(ent)
 		local chamfolder = Instance.new("Highlight")
@@ -3251,29 +3414,27 @@ runFunction(function()
 		end
 	end
 
-	local Chams = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+	local Chams = {Enabled = false}
+	Chams = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "Chams", 
 		Function = function(callback) 
 			if callback then
-				removedconnection = entityLibrary.entityRemovedEvent:Connect(removefunc)
+				table.insert(Chams.Connections, entityLibrary.entityRemovedEvent:Connect(removefunc))
 				for i,v in pairs(entityLibrary.entityList) do 
 					if chamstable[v.Player] then removefunc(v.Player) end
 					addfunc(v)
 				end
-				addedconnection = entityLibrary.entityAddedEvent:Connect(function(ent)
+				table.insert(Chams.Connections, entityLibrary.entityAddedEvent:Connect(function(ent)
 					if chamstable[ent.Player] then removefunc(ent.Player) end
 					addfunc(ent)
-				end)
-				colorupdatedconnection = GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
+				end))
+				table.insert(Chams.Connections, GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
 					for i,v in pairs(chamstable) do 
 						v.Main.FillColor = getPlayerColor(i) or Color3.fromHSV(ChamsColor.Hue, ChamsColor.Sat, ChamsColor.Value)
 						v.Main.OutlineColor = getPlayerColor(i) or Color3.fromHSV(ChamsOutlineColor.Hue, ChamsOutlineColor.Sat, ChamsOutlineColor.Value)
 					end
-				end)
+				end))
 			else
-				if addedconnection then addedconnection:Disconnect() end
-				if removedconnection then removedconnection:Disconnect() end
-				if colorupdatedconnection then colorupdatedconnection:Disconnect() end
 				for i,v in pairs(chamstable) do 
 					removefunc(i)
 				end
@@ -3324,9 +3485,9 @@ end)
 
 runFunction(function()
 	local lightingsettings = {}
-	local lightingconnection
 	local lightingchanged = false
-	GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+	local Fullbright = {Enabled = false}
+	Fullbright = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "Fullbright",
 		Function = function(callback)
 			if callback then 
@@ -3342,7 +3503,7 @@ runFunction(function()
 				lightingService.GlobalShadows = false
 				lightingService.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
 				lightingchanged = false
-				lightingconnection = lightingService.Changed:Connect(function()
+				table.insert(Fullbright.Connections, lightingService.Changed:Connect(function()
 					if not lightingchanged then
 						lightingsettings.Brightness = lightingService.Brightness
 						lightingsettings.ClockTime = lightingService.ClockTime
@@ -3357,9 +3518,8 @@ runFunction(function()
 						lightingService.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
 						lightingchanged = false
 					end
-				end)
+				end))
 			else
-				lightingconnection:Disconnect()  
 				for name, val in pairs(lightingsettings) do 
 					lightingService[name] = val
 				end
@@ -3599,19 +3759,16 @@ runFunction(function()
 		end
 	}
 
-	local addedconnection
-	local removedconnection
-	local updatedconnection
-	local colorconnection
 	local methodused
 
-	local NameTags = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+	local NameTags = {Enabled = false}
+	NameTags = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "NameTags", 
 		Function = function(callback) 
 			if callback then
 				methodused = NameTagsDrawing.Enabled and "Drawing" or "Normal"
 				if nametagfuncs2[methodused] then
-					removedconnection = entityLibrary.entityRemovedEvent:Connect(nametagfuncs2[methodused])
+					table.insert(NameTags.Connections, entityLibrary.entityRemovedEvent:Connect(nametagfuncs2[methodused]))
 				end
 				if nametagfuncs1[methodused] then
 					local addfunc = nametagfuncs1[methodused]
@@ -3619,31 +3776,27 @@ runFunction(function()
 						if nametagsfolderdrawing[v.Player] then nametagfuncs2[methodused](v.Player) end
 						addfunc(v)
 					end
-					addedconnection = entityLibrary.entityAddedEvent:Connect(function(ent)
+					table.insert(NameTags.Connections, entityLibrary.entityAddedEvent:Connect(function(ent)
 						if nametagsfolderdrawing[ent.Player] then nametagfuncs2[methodused](ent.Player) end
 						addfunc(ent)
-					end)
+					end))
 				end
 				if nametagupdatefuncs[methodused] then
-					updatedconnection = entityLibrary.entityUpdatedEvent:Connect(nametagupdatefuncs[methodused])
+					table.insert(NameTags.Connections, entityLibrary.entityUpdatedEvent:Connect(nametagupdatefuncs[methodused]))
 					for i,v in pairs(entityLibrary.entityList) do 
 						nametagupdatefuncs[methodused](v)
 					end
 				end
 				if nametagcolorfuncs[methodused] then 
-					colorconnection = GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
+					table.insert(NameTags.Connections, GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
 						nametagcolorfuncs[methodused](NameTagsColor.Hue, NameTagsColor.Sat, NameTagsColor.Value)
-					end)
+					end))
 				end
 				if nametagloop[methodused] then 
 					RunLoops:BindToRenderStep("NameTags", nametagloop[methodused])
 				end
 			else
 				RunLoops:UnbindFromRenderStep("NameTags")
-				if addedconnection then addedconnection:Disconnect() end
-				if updatedconnection then updatedconnection:Disconnect() end
-				if removedconnection then removedconnection:Disconnect() end
-				if colorconnection then colorconnection:Disconnect() end
 				if nametagfuncs2[methodused] then
 					for i,v in pairs(nametagsfolderdrawing) do 
 						nametagfuncs2[methodused](i)
@@ -3722,8 +3875,6 @@ runFunction(function()
 		end
 		return nil
 	end
-	local searchAdd
-	local searchRemove
 	local searchRefresh = function()
 		SearchFolder:ClearAllChildren()
 		if Search.Enabled then
@@ -3744,7 +3895,7 @@ runFunction(function()
 		Function = function(callback) 
 			if callback then
 				searchRefresh()
-				searchAdd = workspace.DescendantAdded:Connect(function(v)
+				table.insert(Search.Connections, workspace.DescendantAdded:Connect(function(v)
 					if (v:IsA("BasePart") or v:IsA("Model")) and table.find(SearchTextList.ObjectList, v.Name) and searchFindBoxHandle(v) == nil then
 						local highlight = Instance.new("Highlight")
 						highlight.Name = v.Name
@@ -3753,21 +3904,17 @@ runFunction(function()
 						highlight.Adornee = v
 						highlight.Parent = SearchFolder
 					end
-				end)
-				searchRemove = workspace.DescendantRemoving:Connect(function(v)
+				end))
+				table.insert(Search.Connections, workspace.DescendantRemoving:Connect(function(v)
 					if v:IsA("BasePart") or v:IsA("Model") then
 						local boxhandle = searchFindBoxHandle(v)
 						if boxhandle then
 							boxhandle:Remove()
 						end
 					end
-				end)
+				end))
 			else
-				pcall(function()
-					SearchFolder:ClearAllChildren()
-					searchAdd:Disconnect()
-					searchRemove:Disconnect()
-				end)
+				SearchFolder:ClearAllChildren()
 			end
 		end,
 		HoverText = "Draws a box around selected parts\nAdd parts in Search frame"
@@ -3793,23 +3940,22 @@ runFunction(function()
 end)
 
 runFunction(function()
-	local XrayAdd
-	local Xray = GuiLibrary.ObjectsThatCanBeSaved.WorldWindow.Api.CreateOptionsButton({
+	local Xray = {Enabled = false}
+	Xray = GuiLibrary.ObjectsThatCanBeSaved.WorldWindow.Api.CreateOptionsButton({
 		Name = "Xray", 
 		Function = function(callback) 
 			if callback then
-				XrayAdd = workspace.DescendantAdded:Connect(function(v)
+				table.insert(Xray.Connections, workspace.DescendantAdded:Connect(function(v)
 					if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") and not v.Parent.Parent:FindFirstChild("Humanoid") then
 						v.LocalTransparencyModifier = 0.5
 					end
-				end)
+				end))
 				for i, v in pairs(workspace:GetDescendants()) do
 					if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") and not v.Parent.Parent:FindFirstChild("Humanoid") then
 						v.LocalTransparencyModifier = 0.5
 					end
 				end
 			else
-				if XrayAdd then XrayAdd:Disconnect() end
 				for i, v in pairs(workspace:GetDescendants()) do
 					if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") and not v.Parent.Parent:FindFirstChild("Humanoid") then
 						v.LocalTransparencyModifier = 0
@@ -3826,12 +3972,8 @@ runFunction(function()
 	local TracersStartPosition = {Value = "Middle"}
 	local TracersEndPosition = {Value = "Head"}
 	local TracersTeammates = {Enabled = true}
-	local tracersconnections = {}
 	local tracersfolderdrawing = {}
 	local methodused
-	local addedconnection
-	local removedconnection
-	local updatedconnection
 
 	local tracersfuncs1 = {
 		Drawing = function(plr)
@@ -3886,13 +4028,14 @@ runFunction(function()
 		end,
 	}
 
-	local Tracers = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+	local Tracers = {Enabled = false}
+	Tracers = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "Tracers", 
 		Function = function(callback) 
 			if callback then
 				methodused = "Drawing"..synapsev3
 				if tracersfuncs2[methodused] then
-					removedconnection = entityLibrary.entityRemovedEvent:Connect(tracersfuncs2[methodused])
+					table.insert(Tracers.Connections, entityLibrary.entityRemovedEvent:Connect(tracersfuncs2[methodused]))
 				end
 				if tracersfuncs1[methodused] then
 					local addfunc = tracersfuncs1[methodused]
@@ -3900,25 +4043,21 @@ runFunction(function()
 						if tracersfolderdrawing[v.Player] then tracersfuncs2[methodused](v.Player) end
 						addfunc(v)
 					end
-					addedconnection = entityLibrary.entityAddedEvent:Connect(function(ent)
+					table.insert(Tracers.Connections, entityLibrary.entityAddedEvent:Connect(function(ent)
 						if tracersfolderdrawing[ent.Player] then tracersfuncs2[methodused](ent.Player) end
 						addfunc(ent)
-					end)
+					end))
 				end
 				if tracerscolorfuncs[methodused] then 
-					colorconnection = GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
+					table.insert(Tracers.Connections, GuiLibrary.ObjectsThatCanBeSaved.FriendsListTextCircleList.Api.FriendColorRefresh.Event:Connect(function()
 						tracerscolorfuncs[methodused](TracersColor.Hue, TracersColor.Sat, TracersColor.Value)
-					end)
+					end))
 				end
 				if tracersloop[methodused] then 
 					RunLoops:BindToRenderStep("Tracers", tracersloop[methodused])
 				end
 			else
 				RunLoops:UnbindFromRenderStep("Tracers")
-				if addedconnection then addedconnection:Disconnect() end
-				if updatedconnection then updatedconnection:Disconnect() end
-				if removedconnection then removedconnection:Disconnect() end
-				if colorconnection then colorconnection:Disconnect() end
 				for i,v in pairs(tracersfolderdrawing) do 
 					if tracersfuncs2[methodused] then
 						tracersfuncs2[methodused](i)
@@ -4001,9 +4140,9 @@ runFunction(function()
 		end
 	end
 
-	local cameraPos = Vector3.new()
+	local cameraPos = Vector3.zero
 	local cameraRot = Vector2.new()
-	local velSpring = Spring.new(5, Vector3.new())
+	local velSpring = Spring.new(5, Vector3.zero)
 	local panSpring = Spring.new(5, Vector2.new())
 
 	Input = {} do
@@ -4102,7 +4241,7 @@ runFunction(function()
 		local fy = cameraFrame.upVector
 		local fz = cameraFrame.lookVector
 
-		local minVect = Vector3.new()
+		local minVect = Vector3.zero
 		local minDist = 512
 
 		for x = 0, 1, 0.5 do
@@ -4179,7 +4318,7 @@ runFunction(function()
 				cameraPos = cameraCFrame.p
 				cameraFov = gameCamera.FieldOfView
 
-				velSpring:Reset(Vector3.new())
+				velSpring:Reset(Vector3.zero)
 				panSpring:Reset(Vector2.new())
 
 				playerstate.Push()
@@ -4382,10 +4521,10 @@ runFunction(function()
 end)
 
 runFunction(function()
-	local function Cape(char, texture)
+	local function capeFunction(char, texture)
 		for i,v in pairs(char:GetDescendants()) do
 			if v.Name == "Cape" then
-				v:Remove()
+				v:Destroy()
 			end
 		end
 		local hum = char:WaitForChild("Humanoid")
@@ -4402,22 +4541,43 @@ runFunction(function()
 		p.TopSurface = 0
 		p.BottomSurface = 0
 		p.FormFactor = "Custom"
-		p.Size = Vector3.new(0.2,0.2,0.2)
+		p.Size = Vector3.new(0.2,0.2,0.08)
 		p.Transparency = 1
-		local decal = Instance.new("Decal", p)
-		decal.Texture = texture
-		decal.Face = "Back"
+		local decal
+		local video = false
+		if texture:find(".webm") then 
+			video = true
+			local decal2 = Instance.new("SurfaceGui", p)
+			decal2.Adornee = p
+			decal2.CanvasSize = Vector2.new(1, 1)
+			decal2.Face = "Back"
+			decal = Instance.new("VideoFrame", decal2)
+			decal.Size = UDim2.new(0, 9, 0, 17)
+			decal.BackgroundTransparency = 1
+			decal.Position = UDim2.new(0, -4, 0, -8)
+			decal.Video = texture
+			decal.Looped = true
+			decal:Play()
+		else
+			decal = Instance.new("Decal", p)
+			decal.Texture = texture
+			decal.Face = "Back"
+		end
 		local msh = Instance.new("BlockMesh", p)
-		msh.Scale = Vector3.new(9,17.5,0.5)
+		msh.Scale = Vector3.new(9, 17.5, 0.5)
 		local motor = Instance.new("Motor", p)
 		motor.Part0 = p
 		motor.Part1 = torso
 		motor.MaxVelocity = 0.01
-		motor.C0 = CFrame.new(0,2,0) * CFrame.Angles(0,math.rad(90),0)
-		motor.C1 = CFrame.new(0,1,0.45) * CFrame.Angles(0,math.rad(90),0)
+		motor.C0 = CFrame.new(0, 2, 0) * CFrame.Angles(0, math.rad(90), 0)
+		motor.C1 = CFrame.new(0, 1, 0.45) * CFrame.Angles(0, math.rad(90), 0)
 		local wave = false
 		repeat task.wait(1/44)
-			decal.Transparency = torso.Transparency
+			if video then 
+				decal.Visible = torso.LocalTransparencyModifier ~= 1
+			else
+				decal.Transparency = torso.Transparency
+			end
 			local ang = 0.1
 			local oldmag = torso.Velocity.magnitude
 			local mv = 0.002
@@ -4440,27 +4600,35 @@ runFunction(function()
 		until not p or p.Parent ~= torso.Parent
 	end
 
-	local capeConnection
-	GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+	local Cape = {Enabled = false}
+	local CapeBox = {Value = ""}
+	Cape = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
 		Name = "Cape",
 		Function = function(callback)
 			if callback then
-				vapecapeconnection = lplr.CharacterAdded:Connect(function(char)
+				local successfulcustom = false
+				if CapeBox.Value ~= "" then
+					successfulcustom = true
+					if (not isfile(CapeBox.Value)) then 
+						warningNotification("Cape", "Missing file", 5)
+						successfulcustom = false
+					end
+				end
+				table.insert(Cape.Connections, lplr.CharacterAdded:Connect(function(char)
 					task.spawn(function()
 						pcall(function() 
-							Cape(char, downloadVapeAsset("vape/assets/VapeCape.png"))
+							capeFunction(char, (successfulcustom and getcustomasset(CapeBox.Value) or downloadVapeAsset("vape/assets/VapeCape.png")))
 						end)
 					end)
-				end)
+				end))
 				if lplr.Character then
 					task.spawn(function()
 						pcall(function() 
-							Cape(lplr.Character, downloadVapeAsset("vape/assets/VapeCape.png"))
+							capeFunction(lplr.Character, (successfulcustom and getcustomasset(CapeBox.Value) or downloadVapeAsset("vape/assets/VapeCape.png")))
 						end)
 					end)
 				end
 			else
-				if capeConnection then capeConnection:Disconnect() end
 				if lplr.Character then
 					for i,v in pairs(lplr.Character:GetDescendants()) do
 						if v.Name == "Cape" then
@@ -4468,6 +4636,76 @@ runFunction(function()
 						end
 					end
 				end
+			end
+		end
+	})
+	CapeBox = Cape.CreateTextBox({
+		Name = "File",
+		TempText = "File (link)",
+		FocusLost = function(enter) 
+			if enter then 
+				if Cape.Enabled then 
+					Cape.ToggleButton(false)
+					Cape.ToggleButton(false)
+				end
+			end
+		end
+	})
+end)
+
+runFunction(function()
+	local ChinaHat = {Enabled = false}
+	local ChinaHatColor = {Hue = 1, Sat=1, Value=0.33}
+	local chinahattrail
+	local chinahatattachment
+	local chinahatattachment2
+	ChinaHat = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+		Name = "ChinaHat",
+		Function = function(callback)
+			if callback then
+				RunLoops:BindToHeartbeat("ChinaHat", function()
+					if entityLibrary.isAlive then
+						if chinahattrail == nil or chinahattrail.Parent == nil then
+							chinahattrail = Instance.new("Part")
+							chinahattrail.CFrame = entityLibrary.character.Head.CFrame * CFrame.new(0, 1.1, 0)
+							chinahattrail.Size = Vector3.new(3, 0.7, 3)
+							chinahattrail.Name = "ChinaHat"
+							chinahattrail.Material = Enum.Material.Neon
+							chinahattrail.Color = Color3.fromHSV(ChinaHatColor.Hue, ChinaHatColor.Sat, ChinaHatColor.Value)
+							chinahattrail.CanCollide = false
+							chinahattrail.Transparency = 0.3
+							local chinahatmesh = Instance.new("SpecialMesh")
+							chinahatmesh.Parent = chinahattrail
+							chinahatmesh.MeshType = "FileMesh"
+							chinahatmesh.MeshId = "http://www.roblox.com/asset/?id=1778999"
+							chinahatmesh.Scale = Vector3.new(3, 0.6, 3)
+							chinahattrail.Parent = workspace.Camera
+						end
+						chinahattrail.CFrame = entityLibrary.character.Head.CFrame * CFrame.new(0, 1.1, 0)
+						chinahattrail.Velocity = Vector3.zero
+						chinahattrail.LocalTransparencyModifier = ((gameCamera.CFrame.Position - gameCamera.Focus.Position).Magnitude <= 0.6 and 1 or 0)
+					else
+						if chinahattrail then 
+							chinahattrail:Destroy()
+							chinahattrail = nil
+						end
+					end
+				end)
+			else
+				RunLoops:UnbindFromHeartbeat("ChinaHat")
+				if chinahattrail then
+					chinahattrail:Destroy()
+					chinahattrail = nil
+				end
+			end
+		end,
+		HoverText = "Puts a china hat on your character (mastadawn ty for)"
+	})
+	ChinaHatColor = ChinaHat.CreateColorSlider({
+		Name = "Hat Color",
+		Function = function(h, s, v) 
+			if chinahattrail then 
+				chinahattrail.Color = Color3.fromHSV(h, s, v)
 			end
 		end
 	})
@@ -4539,7 +4777,7 @@ runFunction(function()
 					entityLibrary.character.Humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
 					RunLoops:BindToHeartbeat("Swim", function()
 						local rootvelo = entityLibrary.character.HumanoidRootPart.Velocity
-						local moving = entityLibrary.character.Humanoid.MoveDirection ~= Vector3.new()
+						local moving = entityLibrary.character.Humanoid.MoveDirection ~= Vector3.zero
 						entityLibrary.character.HumanoidRootPart.Velocity = ((moving or inputService:IsKeyDown(Enum.KeyCode.Space)) and Vector3.new(moving and rootvelo.X or 0, inputService:IsKeyDown(Enum.KeyCode.Space) and SwimVertical.Value or rootvelo.Y, moving and rootvelo.Z or 0) or Vector3.zero)
 					end)
 				end
@@ -4669,7 +4907,6 @@ runFunction(function()
 	local AutoReportList = {ObjectList = {}}
 	local AutoReportNotify = {Enabled = false}
 	local alreadyreported = {}
-	local chatconnection
 
 	local function removerepeat(str)
 		local newstr = ""
@@ -4759,7 +4996,7 @@ runFunction(function()
 		Function = function(callback) 
 			if callback then 
 				if textChatService.ChatVersion == Enum.ChatVersion.TextChatService then 
-					chatconnection = textChatService.MessageReceived:Connect(function(tab)
+					table.insert(AutoReport.Connections, textChatService.MessageReceived:Connect(function(tab)
 						local plr = tab.TextSource
 						local args = tab.Text:split(" ")
 						if plr and plr ~= lplr and WhitelistFunctions:CheckPlayerType(plr) == "DEFAULT" then
@@ -4781,10 +5018,10 @@ runFunction(function()
 								alreadyreported[plr] = true
 							end
 						end
-					end)
+					end))
 				else 
 					if replicatedStorageService:FindFirstChild("DefaultChatSystemChatEvents") then
-						chatconnection = replicatedStorageService.DefaultChatSystemChatEvents.OnMessageDoneFiltering.OnClientEvent:Connect(function(tab, channel)
+						table.insert(AutoReport.Connections, replicatedStorageService.DefaultChatSystemChatEvents.OnMessageDoneFiltering.OnClientEvent:Connect(function(tab, channel)
 							local plr = playersService:FindFirstChild(tab.FromSpeaker)
 							local args = tab.Message:split(" ")
 							if plr and plr ~= lplr and WhitelistFunctions:CheckPlayerType(plr) == "DEFAULT" then
@@ -4806,14 +5043,12 @@ runFunction(function()
 									alreadyreported[plr] = true
 								end
 							end
-						end)
+						end))
 					else
 						warningNotification("AutoReport", "Default chat not found.", 5)
 						AutoReport.ToggleButton(false)
 					end
 				end
-			else
-				if chatconnection then chatconnection:Disconnect() end
 			end
 		end
 	})
@@ -4828,12 +5063,68 @@ runFunction(function()
 end)
 
 runFunction(function()
+	local targetstrafe = {Enabled = false}
+	local targetstraferange = {Value = 0}
+	local oldmove
+	local controlmodule
+	targetstrafe = GuiLibrary.ObjectsThatCanBeSaved.BlatantWindow.Api.CreateOptionsButton({
+		Name = "TargetStrafe",
+		Function = function(callback)
+			if callback then
+				if not controlmodule then
+					local suc = pcall(function() controlmodule = require(lplr.PlayerScripts.PlayerModule).controls end)
+					if not suc then controlmodule = {} end
+				end
+				oldmove = controlmodule.moveFunction
+				controlmodule.moveFunction = function(Self, vec, facecam, ...)
+					if entityLibrary.isAlive then
+						local plr = EntityNearPosition(targetstraferange.Value, {
+							WallCheck = false,
+							AimPart = "RootPart"
+						})
+						if plr then 
+							facecam = false
+							--code stolen from roblox since the way I tried to make it apparently sucks
+							local c, s
+							local plrCFrame = CFrame.lookAt(entityLibrary.character.HumanoidRootPart.Position, Vector3.new(plr.RootPart.Position.X, 0, plr.RootPart.Position.Z))
+							local _, _, _, R00, R01, R02, _, _, R12, _, _, R22 = plrCFrame:GetComponents()
+							if R12 < 1 and R12 > -1 then
+								c = R22
+								s = R02
+							else
+								c = R00
+								s = -R01*math.sign(R12)
+							end
+							local norm = math.sqrt(c*c + s*s)
+							local cameraRelativeMoveVector = controlmodule:GetMoveVector()
+							vec = Vector3.new(
+								(c*cameraRelativeMoveVector.X + s*cameraRelativeMoveVector.Z)/norm,
+								0,
+								(c*cameraRelativeMoveVector.Z - s*cameraRelativeMoveVector.X)/norm
+							)
+						end
+					end
+					return oldmove(Self, vec, facecam, ...)
+				end
+			else
+				controlmodule.moveFunction = oldmove
+			end
+		end
+	})
+	targetstraferange = targetstrafe.CreateSlider({
+		Name = "Range",
+		Function = function() end,
+		Min = 0,
+		Max = 100,
+		Default = 14
+	})
+end)
+
+runFunction(function()
 	local AutoLeave = {Enabled = false}
 	local AutoLeaveMode = {Value = "UnInject"}
 	local AutoLeaveGroupId = {Value = "0"}
 	local AutoLeaveRank = {Value = "1"}
-	local autoleaveconnection
-
 	local getrandomserver
 	local alreadyjoining = false
 	getrandomserver = function(pointer)
@@ -4944,13 +5235,12 @@ runFunction(function()
 							AutoLeave.ToggleButton(false)
 						end
 					end)
-					autoleaveconnection = playersService.PlayerAdded:Connect(autoleaveplradded)
+					table.insert(AutoLeave.Connections, playersService.PlayerAdded:Connect(autoleaveplradded))
 					for i, plr in pairs(playersService:GetPlayers()) do 
 						autoleaveplradded(plr)
 					end
 				end
 			else
-				if autoleaveconnection then autoleaveconnection:Disconnect() end
 				for i,v in pairs(WhitelistFunctions.CustomTags) do 
 					if v == "[GAME STAFF] " then 
 						WhitelistFunctions.CustomTags[i] = nil
@@ -5040,7 +5330,6 @@ runFunction(function()
 	local AnimationPlayer = {Enabled = false}
 	local AnimationPlayerBox = {Value = ""}
 	local AnimationPlayerSpeed = {Speed = 1}
-	local entadded
 	local playedanim
 	AnimationPlayer = GuiLibrary.ObjectsThatCanBeSaved.UtilityWindow.Api.CreateOptionsButton({
 		Name = "AnimationPlayer",
@@ -5049,36 +5338,55 @@ runFunction(function()
 				if entityLibrary.isAlive then 
 					if playedanim then playedanim:Stop() playedanim = nil end
 					local anim = Instance.new("Animation")
-					anim.AnimationId = "rbxassetid://"..AnimationPlayerBox.Value
+					local suc, id = pcall(function() return string.match(game:GetObjects("rbxassetid://"..AnimationPlayerBox.Value)[1].AnimationId, "%?id=(%d+)") end)
+                    if not suc then
+                        id = AnimationPlayerBox.Value
+                    end
+                    anim.AnimationId = "rbxassetid://"..id
 					local suc, res = pcall(function() playedanim = entityLibrary.character.Humanoid.Animator:LoadAnimation(anim) end)
 					if suc then
 						playedanim.Priority = Enum.AnimationPriority.Action4
 						playedanim.Looped = true
 						playedanim:Play()
 						playedanim:AdjustSpeed(AnimationPlayerSpeed.Value / 10)
+						table.insert(AnimationPlayer.Connections, playedanim.Stopped:Connect(function()
+							if AnimationPlayer.Enabled then
+								AnimationPlayer.ToggleButton(false)
+								AnimationPlayer.ToggleButton(false)
+							end
+						end))
 					else
 						warningNotification("AnimationPlayer", "failed to load anim : "..(res or "invalid animation id"), 5)
 					end
 				end
-				entadded = lplr.CharacterAdded:Connect(function()
+				table.insert(AnimationPlayer.Connections, lplr.CharacterAdded:Connect(function()
 					repeat task.wait() until entityLibrary.isAlive or not AnimationPlayer.Enabled
 					task.wait(0.5)
 					if not AnimationPlayer.Enabled then return end
 					if playedanim then playedanim:Stop() playedanim = nil end
 					local anim = Instance.new("Animation")
-					anim.AnimationId = "rbxassetid://"..AnimationPlayerBox.Value
+					local suc, id = pcall(function() return string.match(game:GetObjects("rbxassetid://"..AnimationPlayerBox.Value)[1].AnimationId, "%?id=(%d+)") end)
+                    if not suc then
+                        id = AnimationPlayerBox.Value
+                    end
+                    anim.AnimationId = "rbxassetid://"..id
 					local suc, res = pcall(function() playedanim = entityLibrary.character.Humanoid.Animator:LoadAnimation(anim) end)
 					if suc then
 						playedanim.Priority = Enum.AnimationPriority.Action4
 						playedanim.Looped = true
 						playedanim:Play()
 						playedanim:AdjustSpeed(AnimationPlayerSpeed.Value / 10)
+						playedanim.Stopped:Connect(function()
+							if AnimationPlayer.Enabled then
+								AnimationPlayer.ToggleButton(false)
+								AnimationPlayer.ToggleButton(false)
+							end
+						end)
 					else
 						warningNotification("AnimationPlayer", "failed to load anim : "..(res or "invalid animation id"), 5)
 					end
-				end)
+				end))
 			else
-				if entadded then entadded:Disconnect() end
 				if playedanim then playedanim:Stop() playedanim = nil end
 			end
 		end
@@ -5088,7 +5396,8 @@ runFunction(function()
 		TempText = "anim (num only)",
 		Function = function(enter) 
 			if enter and AnimationPlayer.Enabled then 
-
+				AnimationPlayer.ToggleButton(false)
+				AnimationPlayer.ToggleButton(false)
 			end
 		end
 	})
@@ -5104,6 +5413,144 @@ runFunction(function()
 		Double = 10
 	})
 end)
+
+runFunction(function()
+	local Atmosphere = {Enabled = false}
+	local SkyUp = {Value = ""}
+	local SkyDown = {Value = ""}
+	local SkyLeft = {Value = ""}
+	local SkyRight = {Value = ""}
+	local SkyFront = {Value = ""}
+	local SkyBack = {Value = ""}
+	local SkySun = {Value = ""}
+	local SkyMoon = {Value = ""}
+	local SkyColor = {Value = 1}
+	local skyobj
+	local skyatmosphereobj
+	local oldobjects = {}
+	Atmosphere = GuiLibrary.ObjectsThatCanBeSaved.RenderWindow.Api.CreateOptionsButton({
+		Name = "Atmosphere",
+		Function = function(callback)
+			if callback then 
+				for i,v in pairs(lightingService:GetChildren()) do 
+					if v:IsA("PostEffect") or v:IsA("Sky") then 
+						table.insert(oldobjects, v)
+						v.Parent = game
+					end
+				end
+				skyobj = Instance.new("Sky")
+				skyobj.SkyboxBk = tonumber(SkyBack.Value) and "rbxassetid://"..SkyBack.Value or SkyBack.Value
+				skyobj.SkyboxDn = tonumber(SkyDown.Value) and "rbxassetid://"..SkyDown.Value or SkyDown.Value
+				skyobj.SkyboxFt = tonumber(SkyFront.Value) and "rbxassetid://"..SkyFront.Value or SkyFront.Value
+				skyobj.SkyboxLf = tonumber(SkyLeft.Value) and "rbxassetid://"..SkyLeft.Value or SkyLeft.Value
+				skyobj.SkyboxRt = tonumber(SkyRight.Value) and "rbxassetid://"..SkyRight.Value or SkyRight.Value
+				skyobj.SkyboxUp = tonumber(SkyUp.Value) and "rbxassetid://"..SkyUp.Value or SkyUp.Value
+				skyobj.SunTextureId = tonumber(SkySun.Value) and "rbxassetid://"..SkySun.Value or SkySun.Value
+				skyobj.MoonTextureId = tonumber(SkyMoon.Value) and "rbxassetid://"..SkyMoon.Value or SkyMoon.Value
+				skyobj.Parent = lightingService
+				skyatmosphereobj = Instance.new("ColorCorrectionEffect")
+				skyatmosphereobj.TintColor = Color3.fromHSV(SkyColor.Hue, SkyColor.Sat, SkyColor.Value)
+				skyatmosphereobj.Parent = lightingService
+			else
+				if skyobj then skyobj:Destroy() end
+				if skyatmosphereobj then skyatmosphereobj:Destroy() end
+				for i,v in pairs(oldobjects) do 
+					v.Parent = lightingService
+				end
+				table.clear(oldobjects)
+			end
+		end
+	})
+	SkyUp = Atmosphere.CreateTextBox({
+		Name = "SkyUp",
+		TempText = "Sky Top ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyDown = Atmosphere.CreateTextBox({
+		Name = "SkyDown",
+		TempText = "Sky Bottom ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyLeft = Atmosphere.CreateTextBox({
+		Name = "SkyLeft",
+		TempText = "Sky Left ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyRight = Atmosphere.CreateTextBox({
+		Name = "SkyRight",
+		TempText = "Sky Right ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyFront = Atmosphere.CreateTextBox({
+		Name = "SkyFront",
+		TempText = "Sky Front ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyBack = Atmosphere.CreateTextBox({
+		Name = "SkyBack",
+		TempText = "Sky Back ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkySun = Atmosphere.CreateTextBox({
+		Name = "SkySun",
+		TempText = "Sky Sun ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyMoon = Atmosphere.CreateTextBox({
+		Name = "SkyMoon",
+		TempText = "Sky Moon ID",
+		FocusLost = function(enter) 
+			if Atmosphere.Enabled then 
+				Atmosphere.ToggleButton(false)
+				Atmosphere.ToggleButton(false)
+			end
+		end
+	})
+	SkyColor = Atmosphere.CreateColorSlider({
+		Name = "Color",
+		Function = function(h, s, v)
+			if skyatmosphereobj then 
+				skyatmosphereobj.TintColor = Color3.fromHSV(SkyColor.Hue, SkyColor.Sat, SkyColor.Value)
+			end
+		end
+	})
+end)
+
 
 runFunction(function()
 	local Disabler = {Enabled = false}
