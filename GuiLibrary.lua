@@ -1,4 +1,25 @@
-if shared.VapeExecuted then
+
+
+TacsHasSkillIssueRoblox
+/
+VapeV4AprilFools
+Public
+Code
+Issues
+Pull requests
+Actions
+Projects
+Wiki
+More
+ main 
+VapeV4AprilFools/GuiLibrary.lua
+
+@TacsHasSkillIssueRoblox
+TacsHasSkillIssueRoblox Add files via upload
+ History
+ 1 contributor
+6549 lines (6379 sloc)  295 KB
+ if shared.VapeExecuted then
 	local VERSION = "4.09"..(shared.VapePrivate and " PRIVATE" or "").." "..readfile("vape/commithash.txt"):sub(1, 6)
 	local baseDirectory = (shared.VapePrivate and "vapeprivate/" or "vape/")
 	local universalRainbowValue = 0
@@ -80,7 +101,7 @@ if shared.VapeExecuted then
 	local vapeCachedAssets = {}
 	local function vapeGithubRequest(scripturl)
 		if not isfile("vape/"..scripturl) then
-			local suc, res = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/7GrandDadPGN/VapeV4ForRoblox/"..readfile("vape/commithash.txt").."/"..scripturl, true) end)
+			local suc, res = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/TacsHasSkillIssueRoblox/VapeV4AprilFools/"..readfile("vape/commithash.txt").."/"..scripturl, true) end)
 			assert(suc, res)
 			assert(res ~= "404: Not Found", res)
 			if scripturl:find(".lua") then res = "--This watermark is used to delete the file if its cached, remove it to make the file persist after commits.\n"..res end
@@ -4569,7 +4590,6 @@ if shared.VapeExecuted then
 					buttonround2.Parent = buttonbkg
 					buttonapi["Enabled"] = false
 					buttonapi["Default"] = argstable["Default"]
-
 					buttonapi["ToggleButton"] = function(toggle, frist)
 						buttonapi["Enabled"] = toggle
 						buttontexticon.Visible = toggle
@@ -4589,7 +4609,6 @@ if shared.VapeExecuted then
 						buttonimage.ImageColor3 = (buttonapi["Enabled"] and Color3.new(1, 1, 1) or Color3.fromRGB(121, 121, 121))
 						argstable["Function"](buttonapi["Enabled"])
 					end
-
 					if argstable["Default"] then
 						buttonapi["ToggleButton"](argstable["Default"], true)
 					end
