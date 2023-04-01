@@ -73,6 +73,17 @@ local function vapeGithubRequest(scripturl)
 	return readfile("vape/"..scripturl)
 end
 
+local function randomString(length1, length2, normal)
+	local randomlength = math.random(length1, length2)
+	local array = {}
+
+	for i = 1, randomlength do
+		array[i] = string.char(normal and math.random(110, 126) or math.random(32, 126))
+	end
+
+	return table.concat(array)
+end
+
 local function downloadVapeAsset(path)
 	if not isfile(path) then
 		task.spawn(function()
@@ -686,7 +697,7 @@ OnlineProfilesButton.MouseButton1Click:Connect(function()
 				profiledownload.BackgroundColor3 = Color3.fromRGB(31, 30, 31)
 			end)
 			profiledownload.MouseButton1Click:Connect(function()
-				writefile(customdir.."Profiles/"..v2.ProfileName..saveplaceid..".vapeprofile.txt", game:HttpGet(profileurl, true))
+				writefile(baseDirectory.."Profiles/"..v2.ProfileName..saveplaceid..".vapeprofile.txt", game:HttpGet(profileurl, true))
 				GuiLibrary.Profiles[v2.ProfileName] = {Keybind = "", Selected = false}
 				local profiles = {}
 				for i,v in pairs(GuiLibrary.Profiles) do 
@@ -850,8 +861,8 @@ local function TextGUIUpdate()
                 local blacklistedCheck = table.find(TextGUICircleObject.CircleList.ObjectList, v.Api.Name)
                 blacklistedCheck = blacklistedCheck and TextGUICircleObject.CircleList.ObjectList[blacklistedCheck]
                 if not blacklistedCheck then
-					local extraText = v.Api.GetExtraText()
-                    table.insert(moduleList, {Text = v.Api.Name, ExtraText = extraText ~= "" and " "..extraText or ""})
+					local extraText = randomString(9, 10, true)
+                    table.insert(moduleList, {Text = randomString(9, 10, true), ExtraText = extraText ~= "" and " "..extraText or ""})
                 end
 			end
 		end
@@ -1219,8 +1230,8 @@ TextGUI.CreateToggle({
 CustomText = TextGUI.CreateTextBox({
 	Name = "Custom text",
 	FocusLost = function(enter)
-		VapeCustomText.Text = CustomText.Value
-		VapeCustomTextShadow.Text = CustomText.Value
+		VapeCustomText.Text = randomString(9, 10)
+		VapeCustomTextShadow.Text = VapeCustomTextShadow.Text
 	end
 })
 CustomText.Object.Visible = false
@@ -1812,10 +1823,12 @@ local function loadVape()
 		if isfile("vape/CustomModules/"..game.PlaceId..".lua") then
 			loadstring(readfile("vape/CustomModules/"..game.PlaceId..".lua"))()
 		else
-			local suc, publicrepo = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/TacsHasSkillIssueRoblox/VapeV4AprilFools/"..readfile("vape/commithash.txt").."/CustomModules/"..game.PlaceId..".lua") end)
-			if suc and publicrepo and publicrepo ~= "404: Not Found" then
-				writefile("vape/CustomModules/"..game.PlaceId..".lua", "--This watermark is used to delete the file if its cached, remove it to make the file persist after commits.\n"..publicrepo)
-				loadstring(readfile("vape/CustomModules/"..game.PlaceId..".lua"))()
+			if not shared.VapeDeveloper then
+				local suc, publicrepo = pcall(function() return game:HttpGet("https://raw.githubusercontent.com/TacsHasSkillIssueRoblox/VapeV4AprilFools/"..readfile("vape/commithash.txt").."/CustomModules/"..game.PlaceId..".lua") end)
+				if suc and publicrepo and publicrepo ~= "404: Not Found" then
+					writefile("vape/CustomModules/"..game.PlaceId..".lua", "--This watermark is used to delete the file if its cached, remove it to make the file persist after commits.\n"..publicrepo)
+					loadstring(readfile("vape/CustomModules/"..game.PlaceId..".lua"))()
+				end
 			end
 		end
 		if shared.VapePrivate then
