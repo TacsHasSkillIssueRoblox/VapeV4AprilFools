@@ -1,24 +1,4 @@
 
-
-TacsHasSkillIssueRoblox
-/
-VapeV4AprilFools
-Public
-Code
-Issues
-Pull requests
-Actions
-Projects
-Wiki
-More
- main 
-VapeV4AprilFools/GuiLibrary.lua
-
-@TacsHasSkillIssueRoblox
-TacsHasSkillIssueRoblox Add files via upload
- History
- 1 contributor
-6549 lines (6379 sloc)  295 KB
  if shared.VapeExecuted then
 	local VERSION = "4.09"..(shared.VapePrivate and " PRIVATE" or "").." "..readfile("vape/commithash.txt"):sub(1, 6)
 	local baseDirectory = (shared.VapePrivate and "vapeprivate/" or "vape/")
